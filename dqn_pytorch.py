@@ -39,10 +39,10 @@ def get_screen():
 GAME = 'bird' # the name of the game being played for log files
 ACTIONS = 2 # number of valid actions
 GAMMA = 0.99 # decay rate of past observations
-OBSERVE = 100000. # timesteps to observe before training
-EXPLORE = 2000000. # frames over which to anneal epsilon
+OBSERVE = 100. # timesteps to observe before training
+EXPLORE = 3000000. # frames over which to anneal epsilon
 FINAL_EPSILON = 0.0001 # final value of epsilon
-INITIAL_EPSILON = 0.0001 # starting value of epsilon
+INITIAL_EPSILON = 0.1 # starting value of epsilon
 REPLAY_MEMORY = 50000 # number of previous transitions to remember
 BATCH = 32 # size of minibatch
 FRAME_PER_ACTION = 1
@@ -79,52 +79,6 @@ def select_action(state,epsilon):
     else:
         return random.randrange(ACTIONS)
 
-# Optimizer
-# def optimize_model():
-#     if len(memory) < BATCH_SIZE:
-#         return
-#     transitions = memory.sample(BATCH_SIZE)
-#     # Transpose the batch (see http://stackoverflow.com/a/19343/3343043 for
-#     # detailed explanation).
-#     batch = Transition(*zip(*transitions))
-#
-#     # Compute a mask of non-final states and concatenate the batch elements
-#     non_final_mask = ByteTensor(tuple(map(lambda s: s is not None,
-#                                           batch.next_state)))
-#
-#     # We don't want to backprop through the expected action values and volatile
-#     # will save us on temporarily changing the model parameters'
-#     # requires_grad to False!
-#     non_final_next_states = Variable(torch.cat([s for s in batch.next_state
-#                                                 if s is not None]),
-#                                      volatile=True)
-#     state_batch = Variable(torch.cat(batch.state))
-#     action_batch = Variable(torch.cat(batch.action))
-#     reward_batch = Variable(torch.cat(batch.reward))
-#
-#     # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
-#     # columns of actions taken
-#     state_action_values = model(state_batch).gather(1, action_batch)
-#
-#     # Compute V(s_{t+1}) for all next states.
-#     next_state_values = Variable(torch.zeros(BATCH_SIZE).type(Tensor))
-#     next_state_values[non_final_mask] = model(non_final_next_states).max(1)[0]
-#     # Now, we don't want to mess up the loss with a volatile flag, so let's
-#     # clear it. After this, we'll just end up with a Variable that has
-#     # requires_grad=False
-#     next_state_values.volatile = False
-#     # Compute the expected Q values
-#     expected_state_action_values = (next_state_values * GAMMA) + reward_batch
-#
-#     # Compute Huber loss
-#     loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
-#
-#     # Optimize the model
-#     optimizer.zero_grad()
-#     loss.backward()
-#     for param in model.parameters():
-#         param.grad.data.clamp_(-1, 1)
-#     optimizer.step()
 
 def playGame():
 
@@ -160,20 +114,20 @@ def playGame():
 
     while "flappy bird" != "angry bird":
         # choose an action epsilon greedily
-        a_t = np.zeros([ACTIONS])
+        a_t = 0
+        aa_t = np.zeros([ACTIONS])
         action_index = 0
         if t % FRAME_PER_ACTION == 0:
             state_tensor = torch.from_numpy(s_t).unsqueeze(0).type(Tensor)
-            a_t[select_action(state_tensor,epsilon)] = 1
-        else:
-            a_t[0] = 1 # do nothing
+            a_t = select_action(state_tensor,epsilon)
+        aa_t[a_t] = 1
 
         # scale down epsilon
         if epsilon > FINAL_EPSILON and t > OBSERVE:
             epsilon -= (INITIAL_EPSILON - FINAL_EPSILON) / EXPLORE
 
         # run the selected action and observe next state and reward
-        x_t1_colored, r_t, terminal = game_state.frame_step(a_t)
+        x_t1_colored, r_t, terminal = game_state.frame_step(aa_t)
         x_t1 = cv2.cvtColor(cv2.resize(x_t1_colored, (80, 80)), cv2.COLOR_BGR2GRAY)
         ret, x_t1 = cv2.threshold(x_t1, 1, 255, cv2.THRESH_BINARY)
         x_t1 = np.reshape(x_t1, (1,80, 80))
@@ -181,44 +135,66 @@ def playGame():
         s_t1 = np.ascontiguousarray(s_t1, dtype=np.float32)
 
         # store the transition in D
-        D.append((s_t, a_t, r_t, s_t1, terminal))
+        D.append((s_t, int(a_t), [r_t], s_t1, terminal))
         if len(D) > REPLAY_MEMORY:
             D.popleft()
 
         # only train if done observing
-        # if t > OBSERVE:
-        #     # sample a minibatch to train on
-        #     minibatch = random.sample(D, BATCH)
-        #
-        #     # get the batch variables
-        #     s_j_batch = [d[0] for d in minibatch]
-        #     a_batch = [d[1] for d in minibatch]
-        #     r_batch = [d[2] for d in minibatch]
-        #     s_j1_batch = [d[3] for d in minibatch]
-        #
-        #     y_batch = []
-        #     readout_j1_batch = readout.eval(feed_dict = {s : s_j1_batch})
-        #     for i in range(0, len(minibatch)):
-        #         terminal = minibatch[i][4]
-        #         # if terminal, only equals reward
-        #         if terminal:
-        #             y_batch.append(r_batch[i])
-        #         else:
-        #             y_batch.append(r_batch[i] + GAMMA * np.max(readout_j1_batch[i]))
-        #
-        #     # perform gradient step
-        #     train_step.run(feed_dict = {
-        #         y : y_batch,
-        #         a : a_batch,
-        #         s : s_j_batch}
-        #     )
+        if t > OBSERVE:
+            # sample a minibatch to train on
+            minibatch = random.sample(D, BATCH)
+
+            # get the batch variables
+            s_j_batch = np.array([d[0] for d in minibatch])
+            a_batch = np.array([d[1] for d in minibatch])
+            r_batch = np.array([d[2] for d in minibatch])
+            s_j1_batch = np.array([d[3] for d in minibatch])
+            terminal_batch = [d[4] for d in minibatch]
+
+            # Compute a mask of non-final states and concatenate the batch elements
+            non_final_mask = ByteTensor(tuple(map(lambda s: s is False,
+                                                  terminal_batch)))
+
+            # We don't want to backprop through the expected action values and volatile
+            # will save us on temporarily changing the model parameters'
+            # requires_grad to False!
+            non_final_next_states = Variable(torch.from_numpy(s_j1_batch[non_final_mask,:,:,:]),
+                                             volatile=True)
+            state_batch = Variable(torch.from_numpy(s_j_batch))
+            action_batch = Variable(torch.from_numpy(a_batch))
+            reward_batch = Variable(torch.from_numpy(r_batch))
+            print(state_batch.size())
+
+            # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
+            # columns of actions taken
+            state_action_values = model(state_batch).gather(1, action_batch)
+
+            # Compute V(s_{t+1}) for all next states.
+            next_state_values = Variable(torch.zeros(BATCH_SIZE).type(Tensor))
+            next_state_values[non_final_mask] = model(non_final_next_states).max(1)[0]
+            # Now, we don't want to mess up the loss with a volatile flag, so let's
+            # clear it. After this, we'll just end up with a Variable that has
+            # requires_grad=False
+            next_state_values.volatile = False
+            # Compute the expected Q values
+            expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+
+            # Compute Huber loss
+            loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
+
+            # Optimize the model
+            optimizer.zero_grad()
+            loss.backward()
+            for param in model.parameters():
+                param.grad.data.clamp_(-1, 1)
+            optimizer.step()
 
         # update the old values
         s_t = s_t1
         t += 1
 
         # save progress every 10000 iterations
-        if t % 10000 == 0:
+        if t % 1000 == 0:
             save_path = 'saved_networks/' + GAME + '-dqn' + str(t) + ".pth.tar"
             np.save("saved_network/checkpointdict.npy",{'checkpoint_path':save_path})
             torch.save({
