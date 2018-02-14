@@ -39,12 +39,12 @@ def get_screen():
 GAME = 'bird' # the name of the game being played for log files
 ACTIONS = 2 # number of valid actions
 GAMMA = 0.99 # decay rate of past observations
-OBSERVE = 100. # timesteps to observe before training
+OBSERVE = 10000. # timesteps to observe before training
 EXPLORE = 3000000. # frames over which to anneal epsilon
 FINAL_EPSILON = 0.0001 # final value of epsilon
-INITIAL_EPSILON = 0.1 # starting value of epsilon
+INITIAL_EPSILON = 0.2 # starting value of epsilon
 REPLAY_MEMORY = 50000 # number of previous transitions to remember
-BATCH = 32 # size of minibatch
+BATCH_SIZE = 32 # size of minibatch
 FRAME_PER_ACTION = 1
 
 class DQN(nn.Module):
@@ -77,6 +77,7 @@ def select_action(state,epsilon):
         readout_t = model(Variable(state, volatile=True).type(FloatTensor)).data
         return readout_t.max(1)[1].view(1, 1)[0,0]
     else:
+        print("----------Random Action----------")
         return random.randrange(ACTIONS)
 
 
@@ -120,7 +121,10 @@ def playGame():
         if t % FRAME_PER_ACTION == 0:
             state_tensor = torch.from_numpy(s_t).unsqueeze(0).type(Tensor)
             a_t = select_action(state_tensor,epsilon)
-        aa_t[a_t] = 1
+            aa_t[a_t] = 1
+        else:
+            a_t = 0
+            aa_t[0] = 1
 
         # scale down epsilon
         if epsilon > FINAL_EPSILON and t > OBSERVE:
@@ -142,7 +146,7 @@ def playGame():
         # only train if done observing
         if t > OBSERVE:
             # sample a minibatch to train on
-            minibatch = random.sample(D, BATCH)
+            minibatch = random.sample(D, BATCH_SIZE)
 
             # get the batch variables
             s_j_batch = np.array([d[0] for d in minibatch])
@@ -152,22 +156,21 @@ def playGame():
             terminal_batch = [d[4] for d in minibatch]
 
             # Compute a mask of non-final states and concatenate the batch elements
-            non_final_mask = ByteTensor(tuple(map(lambda s: s is False,
-                                                  terminal_batch)))
+            non_final_mask_np = tuple(map(lambda s: s is False, terminal_batch))
+            non_final_mask = ByteTensor(non_final_mask_np)
 
             # We don't want to backprop through the expected action values and volatile
             # will save us on temporarily changing the model parameters'
             # requires_grad to False!
-            non_final_next_states = Variable(torch.from_numpy(s_j1_batch[non_final_mask,:,:,:]),
-                                             volatile=True)
-            state_batch = Variable(torch.from_numpy(s_j_batch))
-            action_batch = Variable(torch.from_numpy(a_batch))
-            reward_batch = Variable(torch.from_numpy(r_batch))
-            print(state_batch.size())
+            non_final_next_states = Variable(torch.from_numpy(s_j1_batch[non_final_mask_np,:,:,:]),
+                                             volatile=True).type(FloatTensor)
+            state_batch = Variable(torch.from_numpy(s_j_batch)).type(FloatTensor)
+            action_batch = Variable(torch.from_numpy(a_batch)).type(LongTensor)
+            reward_batch = Variable(torch.from_numpy(r_batch)).type(FloatTensor)
 
             # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
             # columns of actions taken
-            state_action_values = model(state_batch).gather(1, action_batch)
+            state_action_values = model(state_batch).gather(1, action_batch.view(-1,1))
 
             # Compute V(s_{t+1}) for all next states.
             next_state_values = Variable(torch.zeros(BATCH_SIZE).type(Tensor))
@@ -177,7 +180,7 @@ def playGame():
             # requires_grad=False
             next_state_values.volatile = False
             # Compute the expected Q values
-            expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+            expected_state_action_values = (next_state_values * GAMMA).view(-1,1) + reward_batch
 
             # Compute Huber loss
             loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
@@ -194,7 +197,7 @@ def playGame():
         t += 1
 
         # save progress every 10000 iterations
-        if t % 1000 == 0:
+        if t % 10000 == 0:
             save_path = 'saved_networks/' + GAME + '-dqn' + str(t) + ".pth.tar"
             np.save("saved_network/checkpointdict.npy",{'checkpoint_path':save_path})
             torch.save({
@@ -214,7 +217,8 @@ def playGame():
         else:
             state = "train"
 
-        print("TIMESTEP", t, "/ STATE", state, \
+        if t % 100 == 0:
+            print("TIMESTEP", t, "/ STATE", state, \
             "/ EPSILON", epsilon, "/ ACTION", action_index, "/ REWARD", r_t)
         # write info to files
         '''
