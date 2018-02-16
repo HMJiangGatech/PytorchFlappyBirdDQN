@@ -39,12 +39,12 @@ def get_screen():
 GAME = 'bird' # the name of the game being played for log files
 ACTIONS = 2 # number of valid actions
 GAMMA = 0.99 # decay rate of past observations
-OBSERVE = 10000. # timesteps to observe before training
+OBSERVE = 1000000. # timesteps to observe before training
 EXPLORE = 3000000. # frames over which to anneal epsilon
 FINAL_EPSILON = 0.0001 # final value of epsilon
-INITIAL_EPSILON = 0.2 # starting value of epsilon
+INITIAL_EPSILON = 0.0001 # starting value of epsilon
 REPLAY_MEMORY = 50000 # number of previous transitions to remember
-BATCH_SIZE = 32 # size of minibatch
+BATCH_SIZE = 200 # size of minibatch
 FRAME_PER_ACTION = 1
 
 class DQN(nn.Module):
@@ -68,7 +68,7 @@ class DQN(nn.Module):
 model = DQN()
 if use_cuda:
     model.cuda()
-optimizer = optim.RMSprop(model.parameters())
+optimizer = optim.Adam(model.parameters(), lr = 5e-8)
 
 # Auxilary functions
 def select_action(state,epsilon):
@@ -87,9 +87,7 @@ def playGame():
     if os.path.isfile("saved_network/checkpointdict.npy") :
         checkpointdict = np.load("saved_network/checkpointdict.npy").item()
         checkpoint = torch.load(checkpointdict["checkpoint_path"])
-        model_path = checkpoint["model_path"]
         model.load_state_dict(checkpoint['state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
         print("Successfully loaded:", "saved_network/checkpoint.pth.tar")
     else:
         print("Could not find old network weights")
@@ -198,12 +196,11 @@ def playGame():
 
         # save progress every 10000 iterations
         if t % 10000 == 0:
-            save_path = 'saved_networks/' + GAME + '-dqn' + str(t) + ".pth.tar"
+            save_path = 'saved_network/' + GAME + '-dqn' + str(t) + ".pth.tar"
             np.save("saved_network/checkpointdict.npy",{'checkpoint_path':save_path})
             torch.save({
                 't': t,
                 'state_dict': model.state_dict(),
-                'best_prec1': best_prec1,
                 'optimizer' : optimizer.state_dict()
             }, save_path)
 
